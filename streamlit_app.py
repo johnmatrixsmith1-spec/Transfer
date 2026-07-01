@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import io
 from ezdxf import readfile, new
 from pyproj import CRS, Transformer
 
@@ -24,8 +25,7 @@ def transform_point(x, y, z=0):
 
 def transform_dxf(input_dxf_bytes):
     """Convert DXF from ArmWGS84 to WGS84 coordinates"""
-    # Read input DXF
-    import io
+    # Read input DXF from bytes
     dxf = readfile(io.BytesIO(input_dxf_bytes))
     
     # Create new DXF with transformed entities
@@ -36,46 +36,50 @@ def transform_dxf(input_dxf_bytes):
     entity_count = 0
     
     for entity in old_msp:
-        if entity.dxftype() == 'POINT':
-            x, y, z = entity.dxf.location
-            new_x, new_y, new_z = transform_point(x, y, z)
-            new_msp.add_point((new_x, new_y, new_z))
-            entity_count += 1
-            
-        elif entity.dxftype() == 'LINE':
-            p1 = entity.dxf.start
-            p2 = entity.dxf.end
-            new_p1 = transform_point(p1.x, p1.y, p1.z)
-            new_p2 = transform_point(p2.x, p2.y, p2.z)
-            new_msp.add_line(new_p1, new_p2)
-            entity_count += 1
-            
-        elif entity.dxftype() == 'LWPOLYLINE':
-            points = []
-            for x, y, *rest in entity.get_points(as_tuple=True):
-                z = rest[0] if rest else 0
+        try:
+            if entity.dxftype() == 'POINT':
+                x, y, z = entity.dxf.location
                 new_x, new_y, new_z = transform_point(x, y, z)
-                points.append((new_x, new_y))
-            if len(points) > 1:
-                new_msp.add_lwpolyline(points)
+                new_msp.add_point((new_x, new_y, new_z))
                 entity_count += 1
                 
-        elif entity.dxftype() == 'POLYGON':
-            points = []
-            for x, y, *rest in entity.get_points(as_tuple=True):
-                z = rest[0] if rest else 0
-                new_x, new_y, new_z = transform_point(x, y, z)
-                points.append((new_x, new_y))
-            if len(points) > 2:
-                new_msp.add_lwpolyline(points, dxfattribs={'flags': 1})
+            elif entity.dxftype() == 'LINE':
+                p1 = entity.dxf.start
+                p2 = entity.dxf.end
+                new_p1 = transform_point(p1.x, p1.y, p1.z)
+                new_p2 = transform_point(p2.x, p2.y, p2.z)
+                new_msp.add_line(new_p1, new_p2)
                 entity_count += 1
                 
-        elif entity.dxftype() == 'CIRCLE':
-            cx, cy, cz = entity.dxf.center
-            new_cx, new_cy, new_cz = transform_point(cx, cy, cz)
-            radius = entity.dxf.radius
-            new_msp.add_circle((new_cx, new_cy, new_cz), radius)
-            entity_count += 1
+            elif entity.dxftype() == 'LWPOLYLINE':
+                points = []
+                for x, y, *rest in entity.get_points(as_tuple=True):
+                    z = rest[0] if rest else 0
+                    new_x, new_y, new_z = transform_point(x, y, z)
+                    points.append((new_x, new_y))
+                if len(points) > 1:
+                    new_msp.add_lwpolyline(points)
+                    entity_count += 1
+                    
+            elif entity.dxftype() == 'POLYLINE':
+                points = []
+                for vertex in entity.points:
+                    x, y, z = vertex.dxf.location
+                    new_x, new_y, new_z = transform_point(x, y, z)
+                    points.append((new_x, new_y))
+                if len(points) > 1:
+                    new_msp.add_lwpolyline(points)
+                    entity_count += 1
+                    
+            elif entity.dxftype() == 'CIRCLE':
+                cx, cy, cz = entity.dxf.center
+                new_cx, new_cy, new_cz = transform_point(cx, cy, cz)
+                radius = entity.dxf.radius
+                new_msp.add_circle((new_cx, new_cy, new_cz), radius)
+                entity_count += 1
+        except Exception as e:
+            st.warning(f"Could not transform entity {entity.dxftype()}: {str(e)}")
+            continue
     
     return new_dxf, entity_count
 
