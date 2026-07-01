@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import io
-from ezdxf import readfile, new
+import ezdxf
 from pyproj import CRS, Transformer
 
 # --- Coordinate System Definitions ---
@@ -25,11 +25,11 @@ def transform_point(x, y, z=0):
 
 def transform_dxf(input_dxf_bytes):
     """Convert DXF from ArmWGS84 to WGS84 coordinates"""
-    # Read input DXF from bytes
-    dxf = readfile(io.BytesIO(input_dxf_bytes))
+    # Read input DXF from bytes using ezdxf.read()
+    dxf = ezdxf.read(io.BytesIO(input_dxf_bytes))
     
     # Create new DXF with transformed entities
-    new_dxf = new('R2010')
+    new_dxf = ezdxf.new('R2010')
     new_msp = new_dxf.modelspace()
     
     old_msp = dxf.modelspace()
