@@ -58,7 +58,7 @@ if uploaded_file is not None:
 
         doc = ezdxf.new('R2010')
         msp = doc.modelspace()
-        deconstruct_features(k.features(), msp)
+        deconstruct_features(list(k.features), msp)
 
         # Save to a temporary file path to stream back to user
         output_filename = uploaded_file.name.replace('.kmz', '_projected.dxf')
