@@ -30,7 +30,9 @@ if uploaded_file is not None:
         # Recursively extract geometries from document and folders
         def extract_geometries(features):
             global geometry_count
-            for feature in features:
+            # Convert generator to list to avoid exhausting iterator
+            features_list = list(features)
+            for feature in features_list:
                 # Handle folders (Folder elements contain more features)
                 if hasattr(feature, 'features'):
                     extract_geometries(feature.features)
