@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import io
+import ezdxf
 from pyproj import CRS, Transformer
 
 # --- Coordinate System Definitions ---
@@ -22,109 +23,99 @@ def transform_point(x, y, z=0):
     lon, lat = transformer.transform(x, y)
     return lon, lat, z
 
-def parse_str_file(content):
-    """Parse Surpac .str file content"""
-    lines = content.strip().split('\n')
-    features = []
-    current_feature = None
+def transform_dxf(input_dxf_bytes):
+    """Convert DXF from ArmWGS84 to WGS84 coordinates"""
+    # Read input DXF from bytes using ezdxf.read()
+    dxf = ezdxf.read(io.BytesIO(input_dxf_bytes))
     
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith('!'):
-            continue
-        
-        # Check for feature header (typically starts with a letter indicating type)
-        parts = line.split()
-        if len(parts) >= 2:
-            try:
-                # Try to parse as coordinates
-                x = float(parts[0])
-                y = float(parts[1])
-                z = float(parts[2]) if len(parts) > 2 else 0
-                
-                if current_feature is None:
-                    current_feature = {'points': []}
-                
-                current_feature['points'].append((x, y, z))
-            except ValueError:
-                # Line is not coordinates, might be a feature marker
-                if current_feature is not None and current_feature['points']:
-                    features.append(current_feature)
-                current_feature = {'points': []}
+    # Create new DXF with transformed entities
+    new_dxf = ezdxf.new('R2010')
+    new_msp = new_dxf.modelspace()
     
-    # Add last feature
-    if current_feature is not None and current_feature['points']:
-        features.append(current_feature)
-    
-    return features
-
-def transform_str_file(input_str_content):
-    """Convert .str file from ArmWGS84 to WGS84 coordinates"""
-    features = parse_str_file(input_str_content)
-    
-    output_lines = []
+    old_msp = dxf.modelspace()
     entity_count = 0
     
-    for feature in features:
-        transformed_points = []
-        for x, y, z in feature['points']:
-            new_x, new_y, new_z = transform_point(x, y, z)
-            transformed_points.append((new_x, new_y, new_z))
-            entity_count += 1
-        
-        # Write transformed feature
-        for new_x, new_y, new_z in transformed_points:
-            output_lines.append(f"{new_x:.8f} {new_y:.8f} {new_z:.8f}")
-        output_lines.append("")  # Blank line between features
+    for entity in old_msp:
+        try:
+            if entity.dxftype() == 'POINT':
+                x, y, z = entity.dxf.location
+                new_x, new_y, new_z = transform_point(x, y, z)
+                new_msp.add_point((new_x, new_y, new_z))
+                entity_count += 1
+                
+            elif entity.dxftype() == 'LINE':
+                p1 = entity.dxf.start
+                p2 = entity.dxf.end
+                new_p1 = transform_point(p1.x, p1.y, p1.z)
+                new_p2 = transform_point(p2.x, p2.y, p2.z)
+                new_msp.add_line(new_p1, new_p2)
+                entity_count += 1
+                
+            elif entity.dxftype() == 'LWPOLYLINE':
+                points = []
+                for x, y, *rest in entity.get_points(as_tuple=True):
+                    z = rest[0] if rest else 0
+                    new_x, new_y, new_z = transform_point(x, y, z)
+                    points.append((new_x, new_y))
+                if len(points) > 1:
+                    new_msp.add_lwpolyline(points)
+                    entity_count += 1
+                    
+            elif entity.dxftype() == 'POLYLINE':
+                points = []
+                for vertex in entity.points:
+                    x, y, z = vertex.dxf.location
+                    new_x, new_y, new_z = transform_point(x, y, z)
+                    points.append((new_x, new_y))
+                if len(points) > 1:
+                    new_msp.add_lwpolyline(points)
+                    entity_count += 1
+                    
+            elif entity.dxftype() == 'CIRCLE':
+                cx, cy, cz = entity.dxf.center
+                new_cx, new_cy, new_cz = transform_point(cx, cy, cz)
+                radius = entity.dxf.radius
+                new_msp.add_circle((new_cx, new_cy, new_cz), radius)
+                entity_count += 1
+        except Exception as e:
+            st.warning(f"Could not transform entity {entity.dxftype()}: {str(e)}")
+            continue
     
-    return "\n".join(output_lines), entity_count
+    return new_dxf, entity_count
 
 # --- Streamlit Web Interface ---
-st.set_page_config(page_title="Surpac STR Coordinate Translator", page_icon="🗺️")
-st.title("🗺️ Surpac STR Coordinate Translator")
-st.write("Convert Surpac .str coordinates from **ArmWGS84** (projected) to **WGS84** (geographic lat/lon)")
+st.set_page_config(page_title="DXF Coordinate Translator", page_icon="🗺️")
+st.title("🗺️ DXF Coordinate Translator")
+st.write("Convert DXF coordinates from **ArmWGS84** (projected) to **WGS84** (geographic lat/lon)")
 
-col1, col2 = st.columns(2)
+uploaded_file = st.file_uploader("Choose a DXF file (ArmWGS84)", type=["dxf"])
 
-with col1:
-    st.subheader("Upload .str File")
-    uploaded_file = st.file_uploader("Choose a .str file (ArmWGS84)", type=["str", "txt"])
-
-with col2:
-    st.subheader("Or Paste Content")
-    pasted_content = st.text_area("Paste .str file content:", height=200)
-
-if uploaded_file is not None or pasted_content:
+if uploaded_file is not None:
     try:
-        # Get input content
-        if uploaded_file is not None:
-            input_content = uploaded_file.read().decode('utf-8')
-            input_filename = uploaded_file.name
-        else:
-            input_content = pasted_content
-            input_filename = "converted_coords.str"
+        # Read uploaded DXF
+        dxf_bytes = uploaded_file.read()
         
         # Transform coordinates
-        output_content, entity_count = transform_str_file(input_content)
+        new_dxf, entity_count = transform_dxf(dxf_bytes)
         
         if entity_count == 0:
-            st.warning("⚠️ No coordinates found in the file!")
+            st.warning("⚠️ No compatible entities found in the DXF file!")
         else:
-            st.success(f"🎉 Conversion successful! Transformed {entity_count} coordinates.")
+            # Save to temporary file
+            output_filename = uploaded_file.name.replace('.dxf', '_WGS84.dxf')
+            new_dxf.saveas(output_filename)
             
-            # Display preview
-            st.subheader("Preview (first 10 lines):")
-            preview_lines = output_content.split('\n')[:10]
-            st.code('\n'.join(preview_lines), language='text')
+            with open(output_filename, "rb") as file:
+                st.success(f"🎉 Conversion successful! Transformed {entity_count} entities.")
+                st.download_button(
+                    label="📥 Download WGS84 DXF File",
+                    data=file,
+                    file_name=output_filename,
+                    mime="application/dxf"
+                )
             
-            # Download button
-            output_filename = input_filename.replace('.str', '_WGS84.str').replace('.txt', '_WGS84.str')
-            st.download_button(
-                label="📥 Download WGS84 STR File",
-                data=output_content,
-                file_name=output_filename,
-                mime="text/plain"
-            )
+            # Clean up backend file
+            os.remove(output_filename)
     
     except Exception as e:
         st.error(f"❌ Error during conversion: {str(e)}")
