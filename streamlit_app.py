@@ -1,5 +1,4 @@
 import streamlit as st
-import os
 import io
 import ezdxf
 from pyproj import CRS, Transformer
@@ -81,7 +80,12 @@ def transform_dxf(input_dxf_bytes):
             st.warning(f"Could not transform entity {entity.dxftype()}: {str(e)}")
             continue
     
-    return new_dxf, entity_count
+    # Save to BytesIO instead of disk
+    output_buffer = io.BytesIO()
+    new_dxf.saveas(output_buffer)
+    output_buffer.seek(0)
+    
+    return output_buffer.getvalue(), entity_count
 
 # --- Streamlit Web Interface ---
 st.set_page_config(page_title="DXF Coordinate Translator", page_icon="🗺️")
@@ -96,26 +100,21 @@ if uploaded_file is not None:
         dxf_bytes = uploaded_file.read()
         
         # Transform coordinates
-        new_dxf, entity_count = transform_dxf(dxf_bytes)
+        output_dxf_bytes, entity_count = transform_dxf(dxf_bytes)
         
         if entity_count == 0:
             st.warning("⚠️ No compatible entities found in the DXF file!")
         else:
-            # Save to temporary file
+            st.success(f"🎉 Conversion successful! Transformed {entity_count} entities.")
+            
+            # Download button
             output_filename = uploaded_file.name.replace('.dxf', '_WGS84.dxf')
-            new_dxf.saveas(output_filename)
-            
-            with open(output_filename, "rb") as file:
-                st.success(f"🎉 Conversion successful! Transformed {entity_count} entities.")
-                st.download_button(
-                    label="📥 Download WGS84 DXF File",
-                    data=file,
-                    file_name=output_filename,
-                    mime="application/dxf"
-                )
-            
-            # Clean up backend file
-            os.remove(output_filename)
+            st.download_button(
+                label="📥 Download WGS84 DXF File",
+                data=output_dxf_bytes,
+                file_name=output_filename,
+                mime="application/octet-stream"
+            )
     
     except Exception as e:
         st.error(f"❌ Error during conversion: {str(e)}")
