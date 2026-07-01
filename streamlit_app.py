@@ -3,12 +3,11 @@ import os
 import zipfile
 from fastkml import kml
 import ezdxf
-from shapely.geometry import shape
 
 # --- Streamlit Web Interface ---
 st.set_page_config(page_title="KMZ to DXF Converter", page_icon="🌍")
 st.title("🌍 KMZ to DXF Converter")
-st.write("Upload a Google Earth `.kmz` file to convert it to DXF format (no coordinate transformation).")
+st.write("Upload a Google Earth `.kmz` file to convert it to DXF format.")
 
 uploaded_file = st.file_uploader("Choose a KMZ file", type=["kmz"])
 
@@ -26,8 +25,8 @@ if uploaded_file is not None:
         doc = ezdxf.new('R2010')
         msp = doc.modelspace()
 
-        # Extract and add geometries to DXF
-        for feature in k.features():
+        # Extract geometries from all features
+        for feature in k.features:
             if hasattr(feature, 'geometry') and feature.geometry is not None:
                 geom = feature.geometry
                 
